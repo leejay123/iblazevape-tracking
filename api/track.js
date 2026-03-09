@@ -7,49 +7,50 @@ export default async function handler(req, res) {
   const { order, email } = req.query;
   if (!order || !email) return res.status(400).json({ error: 'Missing input' });
 
-  // Use the verified internal domain from your screenshot
   const SHOPIFY_DOMAIN = "6jjpzt-jz.myshopify.com"; 
   const CLIENT_ID = process.env.SHOPIFY_CLIENT_ID; 
   const CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET;
 
   try {
-    // 1. GET THE ACCESS TOKEN
-    const authUrl = `https://${SHOPIFY_DOMAIN}/admin/oauth/access_token`;
-    const tokenResp = await fetch(authUrl, {
+    // STEP 1: AUTHENTICATION
+    // We are adding 'Accept' and ensuring no extra fields are in the body
+    const tokenResp = await fetch(`https://${SHOPIFY_DOMAIN}/admin/oauth/access_token`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
       body: JSON.stringify({
-        client_id: CLIENT_ID,
-        client_secret: CLIENT_SECRET,
+        client_id: CLIENT_ID.trim(), // Force removal of accidental spaces
+        client_secret: CLIENT_SECRET.trim(), // Force removal of accidental spaces
         grant_type: 'client_credentials'
       })
     });
 
-    // CRITICAL: Check if Shopify sent HTML instead of JSON
-    const contentType = tokenResp.headers.get("content-type");
-    if (!tokenResp.ok || (contentType && contentType.includes("text/html"))) {
-      const errorBody = await tokenResp.text();
-      console.error("SHOPIFY REJECTED AUTH ATTEMPT. Status:", tokenResp.status);
-      return res.status(500).json({ 
-        error: "Shopify API Connection Failed", 
-        details: `Shopify returned ${tokenResp.status}. Ensure your Custom App is fully INSTALLED on the store.` 
-      });
-    }
-
     const tokenData = await tokenResp.json();
-    if (!tokenData.access_token) {
-       return res.status(401).json({ error: 'Invalid Credentials', details: tokenData });
+    
+    if (!tokenResp.ok) {
+       console.error("SHOPIFY ERROR DETAIL:", tokenData);
+       return res.status(tokenResp.status).json({ 
+         error: 'Shopify Rejected Request', 
+         details: tokenData.error_description || tokenData.error || "Check App Permissions"
+       });
     }
 
-    // 2. SEARCH FOR THE ORDER
+    const API_TOKEN = tokenData.access_token;
+
+    // STEP 2: SEARCH ORDER
     const orderName = encodeURIComponent(order.startsWith('#') ? order : `#${order}`);
     const orderUrl = `https://${SHOPIFY_DOMAIN}/admin/api/2024-01/orders.json?name=${orderName}&status=any`;
     
-    const orderResp = await fetch(orderUrl, {
-      headers: { 'X-Shopify-Access-Token': tokenData.access_token }
+    const orderResponse = await fetch(orderUrl, {
+      headers: { 
+        'X-Shopify-Access-Token': API_TOKEN,
+        'Content-Type': 'application/json'
+      }
     });
 
-    const orderData = await orderResp.json();
+    const orderData = await orderResponse.json();
 
     if (!orderData.orders || orderData.orders.length === 0) {
       return res.status(404).json({ error: 'Order not found.' });
@@ -58,7 +59,7 @@ export default async function handler(req, res) {
     const matchedOrder = orderData.orders.find(o => o.email && o.email.toLowerCase() === email.toLowerCase());
     if (!matchedOrder) return res.status(403).json({ error: 'Email match failed.' });
 
-    // 3. RETURN SUCCESS (Shop ID 94153834761)
+    // Shop ID: 94153834761
     return res.status(200).json({ 
       success: true, 
       url: `https://shopify.com/94153834761/account/orders/${matchedOrder.id}` 
