@@ -65,7 +65,8 @@ export default async function handler(req, res) {
     // Hand the URL back to the frontend form
     return res.status(200).json({ success: true, url: secureUrl });
 
-  } catch (error) {
-    return res.status(500).json({ error: 'Internal server error connecting to Shopify.' });
+ } catch (error) {
+    console.error("FULL CRASH LOG:", error);
+    return res.status(500).json({ error: `Vercel crashed: ${error.message}` });
   }
 }
